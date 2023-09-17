@@ -60,6 +60,12 @@ func (r *LightRenderer) stderrInternal(str string, allowNLCR bool, resetCode str
 	r.queued.WriteString(string(runes))
 }
 
+func (r *LightRenderer) PrintSixel(text string, finalY int) {
+	r.queued.WriteString(text)
+	r.y = finalY
+	r.x = 0
+}
+
 func (r *LightRenderer) csi(code string) string {
 	fullcode := "\x1b[" + code
 	r.stderr(fullcode)
@@ -903,6 +909,10 @@ func (w *LightWindow) MoveAndClear(y int, x int) {
 	w.Move(y, x)
 }
 
+func (w *LightWindow) GetTermPixels() (int, int, error) {
+	return w.renderer.GetTermPixels()
+}
+
 func attrCodes(attr Attr) []string {
 	codes := []string{}
 	if (attr & AttrClear) > 0 {
@@ -1080,6 +1090,12 @@ func (w *LightWindow) CFill(fg Color, bg Color, attr Attr, text string) FillRetu
 		return w.fill(text, resetCode)
 	}
 	return w.fill(text, w.setBg())
+}
+
+func (w *LightWindow) PrintSixel(text string, finalY int) {
+	w.renderer.PrintSixel(text, finalY)
+	w.posy = finalY
+	w.posx = 0
 }
 
 func (w *LightWindow) FinishFill() {

@@ -254,6 +254,7 @@ type Terminal struct {
 	previewOpts        previewOpts
 	activePreviewOpts  *previewOpts
 	previewer          previewer
+	sxScreen           sixelScreen
 	previewed          previewed
 	previewBox         *util.EventBox
 	eventBox           *util.EventBox
@@ -1290,10 +1291,12 @@ func (t *Terminal) resizeWindows(forcePreview bool) {
 				if previewOpts.position == posUp {
 					t.window = t.tui.NewWindow(
 						marginInt[0]+pheight, marginInt[3], width, height-pheight, false, noBorder)
+					t.sxScreen.updateSizes(width, height, t.window)
 					createPreviewWindow(marginInt[0], marginInt[3], width, pheight)
 				} else {
 					t.window = t.tui.NewWindow(
 						marginInt[0], marginInt[3], width, height-pheight, false, noBorder)
+					t.sxScreen.updateSizes(width, height, t.window)
 					createPreviewWindow(marginInt[0]+height-pheight, marginInt[3], width, pheight)
 				}
 			case posLeft, posRight:
@@ -1322,10 +1325,12 @@ func (t *Terminal) resizeWindows(forcePreview bool) {
 					// Add a 1-column margin between the preview window and the main window
 					t.window = t.tui.NewWindow(
 						marginInt[0], marginInt[3]+pwidth+1, width-pwidth-1, height, false, noBorder)
+					t.sxScreen.updateSizes(width, height, t.window)
 					createPreviewWindow(marginInt[0], marginInt[3], pwidth, height)
 				} else {
 					t.window = t.tui.NewWindow(
 						marginInt[0], marginInt[3], width-pwidth, height, false, noBorder)
+					t.sxScreen.updateSizes(width, height, t.window)
 					// NOTE: fzf --preview 'cat {}' --preview-window border-left --border
 					x := marginInt[3] + width - pwidth
 					if !previewOpts.border.HasRight() && t.borderShape.HasRight() {
@@ -1351,6 +1356,7 @@ func (t *Terminal) resizeWindows(forcePreview bool) {
 			marginInt[3],
 			width,
 			height, false, noBorder)
+		t.sxScreen.updateSizes(width, height, t.window)
 	}
 
 	// Print border label
@@ -1931,10 +1937,10 @@ func (t *Terminal) renderPreviewArea(unchanged bool) {
 		header = t.previewer.lines[0:headerLines]
 		body = t.previewer.lines[headerLines:]
 		// Always redraw header
-		t.renderPreviewText(height, header, 0, false)
+		t.renderPreviewText(height, header, 0, false, false)
 		t.pwindow.MoveAndClear(t.pwindow.Y(), 0)
 	}
-	t.renderPreviewText(height, body, -t.previewer.offset+headerLines, unchanged)
+	t.renderPreviewText(height, body, -t.previewer.offset+headerLines, unchanged, true)
 
 	if !unchanged {
 		t.pwindow.FinishFill()
@@ -1949,10 +1955,46 @@ func (t *Terminal) renderPreviewArea(unchanged bool) {
 	t.renderPreviewScrollbar(headerLines, barLength, barStart)
 }
 
-func (t *Terminal) renderPreviewText(height int, lines []string, lineNo int, unchanged bool) {
+func (t *Terminal) renderPreviewText(height int, lines []string, lineNo int, unchanged bool, renderBody bool) {
 	maxWidth := t.pwindow.Width()
 	var ansi *ansiState
 	spinnerRedraw := t.pwindow.Y() == 0
+
+	var sixelBuffer []string
+	processingSixel := false
+
+	var fillRet tui.FillReturn
+
+	linePreview := func(line string, lbg tui.Color) (tui.FillReturn, tui.Color) {
+		var fillRet tui.FillReturn
+		prefixWidth := 0
+		_, _, ansi = extractColor(line, ansi, func(str string, ansi *ansiState) bool {
+			trimmed := []rune(str)
+			isTrimmed := false
+			if !t.previewOpts.wrap {
+				trimmed, isTrimmed = t.trimRight(trimmed, maxWidth-t.pwindow.X())
+			}
+			str, width := t.processTabs(trimmed, prefixWidth)
+			if width > prefixWidth {
+				prefixWidth = width
+				if t.theme.Colored && ansi != nil && ansi.colored() {
+					lbg = ansi.lbg
+					fillRet = t.pwindow.CFill(ansi.fg, ansi.bg, ansi.attr, str)
+				} else {
+					fillRet = t.pwindow.CFill(tui.ColPreview.Fg(), tui.ColPreview.Bg(), tui.AttrRegular, str)
+				}
+			}
+			return !isTrimmed &&
+				(fillRet == tui.FillContinue || t.previewOpts.wrap && fillRet == tui.FillNextLine)
+		})
+		t.previewer.scrollable = t.previewer.scrollable || t.pwindow.Y() == height-1 && t.pwindow.X() == t.pwindow.Width()
+		if fillRet == tui.FillSuspend {
+			t.previewed.filled = true
+		}
+
+		return fillRet, lbg
+	}
+
 	for _, line := range lines {
 		var lbg tui.Color = -1
 		if ansi != nil {
@@ -1971,28 +2013,64 @@ func (t *Terminal) renderPreviewText(height int, lines []string, lineNo int, unc
 				t.renderPreviewSpinner()
 				t.pwindow.Move(y, x)
 			}
-			var fillRet tui.FillReturn
-			prefixWidth := 0
-			_, _, ansi = extractColor(line, ansi, func(str string, ansi *ansiState) bool {
-				trimmed := []rune(str)
-				isTrimmed := false
-				if !t.previewOpts.wrap {
-					trimmed, isTrimmed = t.trimRight(trimmed, maxWidth-t.pwindow.X())
+
+			sixelBegin := strings.Index(line, gSixelBegin)
+			if sixelBegin > 0 {
+				linePreview(line[:sixelBegin], lbg)
+			}
+			if t.sxScreen.wpx > 0 && t.sxScreen.hpx > 0 && sixelBegin >= 0 && renderBody {
+				var lookFrom int
+				if !processingSixel && sixelBegin >= 0 {
+					line = line[sixelBegin:]
+					processingSixel = true
+					lookFrom = 2
 				}
-				str, width := t.processTabs(trimmed, prefixWidth)
-				if width > prefixWidth {
-					prefixWidth = width
-					if t.theme.Colored && ansi != nil && ansi.colored() {
-						lbg = ansi.lbg
-						fillRet = t.pwindow.CFill(ansi.fg, ansi.bg, ansi.attr, str)
-					} else {
-						fillRet = t.pwindow.CFill(tui.ColPreview.Fg(), tui.ColPreview.Bg(), tui.AttrRegular, str)
+
+				if processingSixel {
+					sixelTerminate := strings.Index(line[lookFrom:], gSixelTerminate)
+					if sixelTerminate < 0 {
+						sixelBuffer = append(sixelBuffer, line)
+						continue
 					}
+
+					sixelTerminate += lookFrom
+					sixelBuffer = append(sixelBuffer, line[:sixelTerminate+2])
+					sx := strings.Join(sixelBuffer, "")
+
+					wpx, hpx := sixelDimPx(sx)
+					wc, hc := t.sxScreen.pxToCells(wpx, hpx)
+
+					if wc > t.pwindow.Width() || hc > t.pwindow.Height() {
+						fillRet, lbg = linePreview(fmt.Sprintf("!!! [The photo size(%d, %d) is bigger than window size(%d, %d)]",
+							wc, hc, t.pwindow.Width(), t.pwindow.Height()), lbg)
+					} else if hc > t.pwindow.Height()-t.pwindow.Y()-1 {
+						// we will view this photo when the preview window can place it.
+						fillRet, lbg = linePreview("!!! [Scroll to show the picture]", lbg)
+						fillRet = tui.FillSuspend
+					} else {
+						oriY := t.pwindow.Y()
+						/* oriX := t.pwindow.X() */
+						t.pwindow.Move(oriY, 0)
+						for i := 0; i < hc; i++ {
+							t.pwindow.Fill(strings.Repeat(" ", t.pwindow.Width()))
+						}
+						t.pwindow.Move(oriY, 0)
+						t.pwindow.PrintSixel(sx, oriY+hc-1)
+						lineNo += hc
+						if t.pwindow.Y() >= t.pwindow.Height() {
+							fillRet = tui.FillSuspend
+						} else {
+							fillRet = tui.FillNextLine
+						}
+					}
+					sixelBuffer = []string{}
+
+					processingSixel = false
 				}
-				return !isTrimmed &&
-					(fillRet == tui.FillContinue || t.previewOpts.wrap && fillRet == tui.FillNextLine)
-			})
-			t.previewer.scrollable = t.previewer.scrollable || t.pwindow.Y() == height-1 && t.pwindow.X() == t.pwindow.Width()
+			} else {
+				fillRet, lbg = linePreview(line, lbg)
+			}
+
 			if fillRet == tui.FillNextLine {
 				continue
 			} else if fillRet == tui.FillSuspend {
@@ -2002,6 +2080,7 @@ func (t *Terminal) renderPreviewText(height int, lines []string, lineNo int, unc
 			if unchanged && lineNo == 0 {
 				break
 			}
+
 			if lbg >= 0 {
 				t.pwindow.CFill(-1, lbg, tui.AttrRegular,
 					strings.Repeat(" ", t.pwindow.Width()-t.pwindow.X())+"\n")
@@ -2881,7 +2960,7 @@ func (t *Terminal) Loop() {
 								t.previewer.offset = 0
 							}
 						}
-						t.previewer.lines = result.lines
+						t.previewer.lines = t.sxScreen.sortSixelLines(result.lines)
 						t.previewer.spinner = result.spinner
 						if t.previewer.following.Enabled() {
 							t.previewer.offset = util.Max(t.previewer.offset, len(t.previewer.lines)-(t.pwindow.Height()-t.previewOpts.headerLines))

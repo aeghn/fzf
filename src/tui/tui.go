@@ -505,7 +505,10 @@ type Window interface {
 	CPrint(color ColorPair, text string)
 	Fill(text string) FillReturn
 	CFill(fg Color, bg Color, attr Attr, text string) FillReturn
+	PrintSixel(text string, yoffset int)
 	Erase()
+
+	GetTermPixels() (int, int, error)
 }
 
 type FullscreenRenderer struct {

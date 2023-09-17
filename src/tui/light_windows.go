@@ -143,3 +143,7 @@ func (r *LightRenderer) getch(nonblock bool) (int, bool) {
 		return int(bc), true
 	}
 }
+
+func GetTermPixels() (w, h int, err error) {
+	return -1, -1, nil
+}
