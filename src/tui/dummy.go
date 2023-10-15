@@ -47,3 +47,5 @@ func (r *FullscreenRenderer) RefreshWindows(windows []Window) {}
 func (r *FullscreenRenderer) NewWindow(top int, left int, width int, height int, preview bool, borderStyle BorderStyle) Window {
 	return nil
 }
+
+func (r *FullscreenRenderer) PassThrough(sx string) {}

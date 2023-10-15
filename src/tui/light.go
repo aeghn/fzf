@@ -1110,3 +1110,7 @@ func (w *LightWindow) Erase() {
 	// We don't erase the window here to avoid flickering during scroll
 	w.Move(0, 0)
 }
+
+func (w *LightRenderer) PassThrough(sx string) {
+	w.queued.WriteString(sx)
+}

@@ -482,6 +482,7 @@ type Renderer interface {
 	MaxY() int
 
 	NewWindow(top int, left int, width int, height int, preview bool, borderStyle BorderStyle) Window
+	PassThrough(sx string)
 }
 
 type Window interface {

@@ -2055,7 +2055,7 @@ func (t *Terminal) renderPreviewText(height int, lines []string, lineNo int, unc
 							t.pwindow.Fill(strings.Repeat(" ", t.pwindow.Width()))
 						}
 						t.pwindow.Move(oriY, 0)
-						t.pwindow.PrintSixel(sx, oriY+hc-1)
+						t.tui.PassThrough(sx)
 						lineNo += hc
 						if t.pwindow.Y() >= t.pwindow.Height() {
 							fillRet = tui.FillSuspend
