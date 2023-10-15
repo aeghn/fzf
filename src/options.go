@@ -1489,6 +1489,19 @@ func parsePreviewWindowImpl(opts *previewOpts, input string, exit func(string)) 
 			}
 		}
 	}
+	if opts.border == tui.BorderDefault {
+		switch opts.position {
+		case posUp:
+			opts.border = tui.BorderBottom
+		case posDown:
+			opts.border = tui.BorderTop
+		case posLeft:
+			opts.border = tui.BorderRight
+		case posRight:
+			opts.border = tui.BorderLeft
+		}
+	}
+
 	if len(alternative) > 0 {
 		alternativeOpts := *opts
 		opts.alternative = &alternativeOpts

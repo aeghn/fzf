@@ -323,6 +323,7 @@ const (
 	BorderBottom
 	BorderLeft
 	BorderRight
+	BorderDefault
 )
 
 func (s BorderShape) HasRight() bool {
